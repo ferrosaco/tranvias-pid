@@ -4,7 +4,7 @@ This section includes more advanced or uncommon options.
 
 ## API Server
 
-Aquí va la URL del adaptador de iTranvías descrito en [API Server](../../03-advanced/api-server.md). Incluye el esquema, `http://` o `https://`. El configurador la convierte a WebSocket al grabarla en el panel. Sin esta URL el dispositivo no tiene de dónde leer las llegadas de A Coruña.
+La URL pública es `https://configurador-coru.vercel.app`. Solo hace falta para elegir la parada en el mapa. El panel no la usa para las llegadas: las pide directamente a iTranvías. El servicio está descrito en [API Server](../../03-advanced/api-server.md).
 
 ## Display Orientation
 
