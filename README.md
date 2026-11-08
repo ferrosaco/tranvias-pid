@@ -19,7 +19,7 @@ Hay que grabar este firmware y volver a elegir la parada.
 
 ## Para montar un panel desde cero
 
-Hay que seguir la documentación del proyecto original, que está [aquí](https://eastsideurbanism.github.io/transit-tracker), y flashear el firmware de este repositorio cuando llegue el momento. La documentación que se ha utilizado para interpretar la API de iTranvías es [esta](https://pedrorey.es/itranvias_api/itranvias_api.html).
+Hay que seguir la documentación del proyecto original, que está [aquí](https://eastsideurbanism.github.io/transit-tracker), y flashear [el firmware de este repositorio](https://github.com/ferrosaco/transit-tracker-coru/raw/main/docs/static/firmware/firmware.ota.bin) cuando llegue el momento. La documentación que se ha utilizado para interpretar la API de iTranvías es [esta](https://pedrorey.es/itranvias_api/itranvias_api.html).
 
 ## Proyectos relacionados
 
