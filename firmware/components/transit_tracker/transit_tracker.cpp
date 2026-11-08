@@ -279,9 +279,18 @@ void TransitTracker::on_shutdown() {
 }
 
 bool TransitTracker::ingest_network_(const char *body, size_t length) {
-  JsonDocument doc = json::parse_json(reinterpret_cast<const uint8_t *>(body), length);
-  if (doc.isNull()) {
-    ESP_LOGW(TAG, "Static catalog is not valid JSON (%u bytes)", static_cast<unsigned>(length));
+  // The links inside each stop nest one level past ArduinoJson's default of 10,
+  // which is the "Parse error: TooDeep" seen on the device.
+#ifdef USE_PSRAM
+  json::SpiRamAllocator allocator;
+  JsonDocument doc(&allocator);
+#else
+  JsonDocument doc;
+#endif
+  DeserializationError json_error =
+      deserializeJson(doc, reinterpret_cast<const uint8_t *>(body), length, DeserializationOption::NestingLimit(16));
+  if (json_error) {
+    ESP_LOGW(TAG, "Static catalog JSON error: %s (%u bytes)", json_error.c_str(), static_cast<unsigned>(length));
     return false;
   }
 
