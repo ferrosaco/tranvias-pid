@@ -1,4 +1,4 @@
-# Transit Tracker Coru
+# Fork de Transit Tracker para el bus urbano de A Coruña
 
 <p align="center">
   <img src="docs/static/img/transit-tracker.webp" alt="Transit Tracker Logo" width="400" />
