@@ -13,7 +13,7 @@ Se sigue utilizando el configurador original para elegir la parada. El mapa usa 
 Hay que grabar este firmware y volver a elegir la parada.
 
 1. Pulsa los dos botones del panel a la vez hasta que aparezca la IP. Ábrela en el navegador y apaga **Auto-Update**.
-2. Descarga [`docs/static/firmware/firmware.ota.bin`](docs/static/firmware/firmware.ota.bin) (el archivo se llama `firmware.ota.bin`, no el factory). En la misma web del panel, sección **OTA Update**, elige ese archivo y pulsa Update. Es posible que haya que realizar una instalación limpia o grabarlo por USB con ESPHome 2026.9.1: `esphome run transit-tracker.yaml` dentro de `firmware/`.
+2. [Descarga el firmware adaptado](https://github.com/ferrosaco/transit-tracker-coru/raw/main/docs/static/firmware/firmware.ota.bin). En la misma web del panel, sección **OTA Update**, elige ese archivo y pulsa Update. Es posible que haya que realizar una instalación limpia o grabarlo por USB con ESPHome 2026.9.1: `esphome run transit-tracker.yaml` dentro de `firmware/`.
 3. Abre el configurador, pestaña Advanced, y pon de URL del API `https://configurador-coru.vercel.app`. Elige la parada y las líneas y guarda, igual que siempre. Los identificadores quedan como `coruna:100` (línea) y `coruna:1` (parada).
 4. El panel pregunta a iTranvías por su cuenta y se autorregula si la API se satura.
 
