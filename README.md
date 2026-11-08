@@ -1,7 +1,7 @@
 # Fork de Transit Tracker para el bus urbano de A Coruña
 
 <p align="center">
-  <img src="docs/static/img/transit-tracker.webp" alt="Transit Tracker Logo" width="400" />
+  <img src="docs/static/img/transit-tracker.png" alt="Transit Tracker Logo" width="400" />
 </p>
 
 Este repositorio es un fork de Transit Tracker solo para los buses de A Coruña. El panel llama él mismo a la API `queryitr` de iTranvías (`https://itranvias.com/queryitr_v3.php`) sin necesidad de servidor intermediario durante el funcionamiento. No hay GTFS ni otras ciudades.
