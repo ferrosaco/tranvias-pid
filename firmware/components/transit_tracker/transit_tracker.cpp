@@ -1,9 +1,9 @@
 #include "transit_tracker.h"
 #include "string_utils.h"
 
+#include <algorithm>
 #include <cstring>
 #include <cstdlib>
-#include <set>
 
 #include "esp_crt_bundle.h"
 #include "esp_heap_caps.h"
@@ -22,7 +22,8 @@ namespace transit_tracker {
 
 static const char *const TAG = "transit_tracker.component";
 
-static constexpr unsigned long POLL_INTERVAL_MS = 15000;
+static constexpr unsigned long POLL_INTERVAL_MS = 20000;
+static constexpr unsigned long RATE_LIMIT_BACKOFF_MS = 60000;
 static constexpr unsigned long CATALOG_TTL_MS = 6UL * 60UL * 60UL * 1000UL;
 static constexpr size_t MAX_HTTP_BODY = 200000;
 static const char *const STATIC_URL =
@@ -65,14 +66,16 @@ struct PsramBody {
   PsramBody &operator=(const PsramBody &) = delete;
 };
 
-static bool fetch_url(const char *url, PsramBody &body) {
+// 200 and a filled body on success. The HTTP status on a response, or 0 when
+// the connection itself failed.
+static int fetch_url(const char *url, PsramBody &body) {
   heap_caps_free(body.data);
   body.data = nullptr;
   body.size = 0;
   char *buffer = static_cast<char *>(heap_caps_malloc(MAX_HTTP_BODY + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (buffer == nullptr) {
     ESP_LOGW(TAG, "No PSRAM for the iTranvías response");
-    return false;
+    return 0;
   }
   esp_http_client_config_t config = {};
   config.url = url;
@@ -86,7 +89,7 @@ static bool fetch_url(const char *url, PsramBody &body) {
   if (client == nullptr) {
     heap_caps_free(buffer);
     ESP_LOGW(TAG, "HTTP client init failed");
-    return false;
+    return 0;
   }
 
   esp_err_t err = esp_http_client_open(client, 0);
@@ -94,7 +97,7 @@ static bool fetch_url(const char *url, PsramBody &body) {
     heap_caps_free(buffer);
     ESP_LOGW(TAG, "HTTP open failed: %s", esp_err_to_name(err));
     esp_http_client_cleanup(client);
-    return false;
+    return 0;
   }
 
   esp_http_client_fetch_headers(client);
@@ -104,7 +107,7 @@ static bool fetch_url(const char *url, PsramBody &body) {
     ESP_LOGW(TAG, "HTTP %d for %s", status, url);
     esp_http_client_close(client);
     esp_http_client_cleanup(client);
-    return false;
+    return status;
   }
 
   char chunk[1024];
@@ -118,7 +121,7 @@ static bool fetch_url(const char *url, PsramBody &body) {
       heap_caps_free(buffer);
       esp_http_client_close(client);
       esp_http_client_cleanup(client);
-      return false;
+      return 0;
     }
     if (read == 0) {
       if (esp_http_client_is_complete_data_received(client) || ++idle_reads > 3) {
@@ -136,7 +139,12 @@ static bool fetch_url(const char *url, PsramBody &body) {
   body.size = size;
   esp_http_client_close(client);
   esp_http_client_cleanup(client);
-  return size > 0;
+  if (size == 0) {
+    heap_caps_free(buffer);
+    body.data = nullptr;
+    return 0;
+  }
+  return 200;
 }
 
 void TransitTracker::setup() {
@@ -165,6 +173,9 @@ void TransitTracker::loop() {
     return;
   }
   if (!esphome::network::is_connected()) {
+    return;
+  }
+  if (static_cast<int32_t>(millis() - this->rate_limit_until_.load()) < 0) {
     return;
   }
   auto now = this->rtc_->now();
@@ -475,6 +486,27 @@ void TransitTracker::apply_result_now_(FetchResult result) {
   ESP_LOGI(TAG, "Published the iTranvías schedule");
 }
 
+std::vector<itranvias::LiveBus> TransitTracker::aged_buses_(const CachedStop &cached, std::time_t now) const {
+  std::time_t elapsed = now > cached.fetched_at ? now - cached.fetched_at : 0;
+  std::vector<itranvias::LiveBus> out;
+  out.reserve(cached.buses.size());
+  for (auto bus : cached.buses) {
+    if (bus.imminent || bus.minutes <= 0) {
+      if (elapsed < 90) {
+        out.push_back(bus);
+      }
+      continue;
+    }
+    std::time_t left = static_cast<std::time_t>(bus.minutes) * 60 - elapsed;
+    if (left <= 20) {
+      continue;
+    }
+    bus.minutes = static_cast<int>(left / 60);
+    out.push_back(bus);
+  }
+  return out;
+}
+
 TransitTracker::FetchResult TransitTracker::fetch_schedule_(const PollJob &job) {
   FetchResult result;
   result.generation = job.generation;
@@ -493,7 +525,7 @@ TransitTracker::FetchResult TransitTracker::fetch_schedule_(const PollJob &job) 
   if (!this->network_ready_ || catalog_expired) {
     PsramBody body;
     ESP_LOGI(TAG, "Fetching iTranvías catalog");
-    if (!fetch_url(STATIC_URL, body) || !this->ingest_network_(body.data, body.size)) {
+    if (fetch_url(STATIC_URL, body) != 200 || !this->ingest_network_(body.data, body.size)) {
       if (!this->network_ready_) {
         result.failure = FetchFailure::CATALOG;
         return result;
@@ -506,25 +538,43 @@ TransitTracker::FetchResult TransitTracker::fetch_schedule_(const PollJob &job) 
   }
 
   std::map<int, std::vector<itranvias::LiveBus>> buses_by_stop;
-  bool any_failure = false;
-  std::set<int> stops;
+  std::vector<int> stops;
   for (const auto &pair : pairs) {
-    stops.insert(pair.stop_local);
-  }
-  ESP_LOGI(TAG, "Fetching arrivals for %u stops", static_cast<unsigned>(stops.size()));
-  for (int stop_id : stops) {
-    std::string url = std::string(LIVE_URL_PREFIX) + std::to_string(stop_id);
-    PsramBody body;
-    std::vector<itranvias::LiveBus> buses;
-    if (!fetch_url(url.c_str(), body) || !this->ingest_buses_(body.data, body.size, buses)) {
-      any_failure = true;
-      ESP_LOGW(TAG, "No live arrivals for stop %d", stop_id);
-      continue;
+    if (std::find(stops.begin(), stops.end(), pair.stop_local) == stops.end()) {
+      stops.push_back(pair.stop_local);
     }
-    buses_by_stop[stop_id] = std::move(buses);
+  }
+  // One stop per poll. Asking for every stop every few seconds made iTranvías
+  // answer 429, and the stops that failed dropped off the matrix.
+  if (stops.empty()) {
+    result.failure = FetchFailure::ARRIVALS;
+    return result;
+  }
+  int stop_id = stops[this->next_stop_cursor_ % stops.size()];
+  this->next_stop_cursor_++;
+  ESP_LOGI(TAG, "Fetching arrivals for stop %d", stop_id);
+  std::string url = std::string(LIVE_URL_PREFIX) + std::to_string(stop_id);
+  PsramBody body;
+  std::vector<itranvias::LiveBus> buses;
+  int status = fetch_url(url.c_str(), body);
+  if (status == 429) {
+    this->rate_limit_until_.store(millis() + RATE_LIMIT_BACKOFF_MS);
+    ESP_LOGW(TAG, "iTranvías asked to slow down; keeping the arrivals already on screen");
+  } else if (status == 200 && this->ingest_buses_(body.data, body.size, buses)) {
+    this->cached_buses_[stop_id] = CachedStop{job.now, std::move(buses)};
+  } else {
+    ESP_LOGW(TAG, "No live arrivals for stop %d", stop_id);
   }
 
-  if (buses_by_stop.empty() && any_failure) {
+  for (int stop_id : stops) {
+    auto cached = this->cached_buses_.find(stop_id);
+    if (cached == this->cached_buses_.end()) {
+      continue;
+    }
+    buses_by_stop[stop_id] = aged_buses_(cached->second, job.now);
+  }
+
+  if (buses_by_stop.empty()) {
     result.failure = FetchFailure::ARRIVALS;
     return result;
   }

@@ -119,8 +119,14 @@ class TransitTracker : public Component {
     std::vector<Trip> trips_from_(const std::vector<itranvias::BuiltTrip> &trips, const PollJob &job) const;
     void apply_result_();
     void apply_result_now_(FetchResult result);
+    struct CachedStop {
+      std::time_t fetched_at{0};
+      std::vector<itranvias::LiveBus> buses;
+    };
+
     bool ingest_network_(const char *body, size_t length);
     bool ingest_buses_(const char *body, size_t length, std::vector<itranvias::LiveBus> &out);
+    std::vector<itranvias::LiveBus> aged_buses_(const CachedStop &cached, std::time_t now) const;
     void request_refresh_();
 
     std::atomic<bool> refresh_requested_{false};
@@ -134,6 +140,9 @@ class TransitTracker : public Component {
     std::mutex result_mutex_;
     bool result_ready_{false};
     FetchResult result_{};
+    std::map<int, CachedStop> cached_buses_;
+    size_t next_stop_cursor_{0};
+    std::atomic<uint32_t> rate_limit_until_{0};
     bool network_ready_ = false;
     bool has_valid_pairs_ = false;
     bool has_loaded_ = false;
